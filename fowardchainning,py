@@ -1,0 +1,176 @@
+import copy
+
+# ======================
+# --- Unification Code ---
+# ======================
+
+def is_variable(x):
+    return isinstance(x, str) and x[0].islower() and x.isalpha()
+
+def is_compound(x):
+    return isinstance(x, tuple)
+
+def occurs_check(var, x, theta):
+    if var == x:
+        return True
+    elif is_variable(x) and x in theta:
+        return occurs_check(var, theta[x], theta)
+    elif is_compound(x):
+        return any(occurs_check(var, arg, theta) for arg in x[1])
+    return False
+
+def unify(x, y, theta=None):
+    if theta is None:
+        theta = {}
+    if theta is False:
+        return False
+    elif x == y:
+        return theta
+    elif is_variable(x):
+        return unify_var(x, y, theta)
+    elif is_variable(y):
+        return unify_var(y, x, theta)
+    elif is_compound(x) and is_compound(y) and x[0] == y[0] and len(x[1]) == len(y[1]):
+        for arg_x, arg_y in zip(x[1], y[1]):
+            theta = unify(arg_x, arg_y, theta)
+            if theta is False:
+                return False
+        return theta
+    else:
+        return False
+
+def unify_var(var, x, theta):
+    if var in theta:
+        return unify(theta[var], x, theta)
+    elif is_variable(x) and x in theta:
+        return unify(var, theta[x], theta)
+    elif occurs_check(var, x, theta):
+        return False
+    else:
+        theta[var] = x
+        return theta
+
+# ======================
+# --- Parser Helpers ---
+# ======================
+
+def parse_term(expr):
+    expr = expr.replace(" ", "")
+    if "(" not in expr:
+        return expr
+    functor, args = expr.split("(", 1)
+    args = args[:-1]
+    args_list = [parse_term(a) for a in split_args(args)]
+    return (functor, args_list)
+
+def split_args(s):
+    parts, depth, current = [], 0, ""
+    for ch in s:
+        if ch == "," and depth == 0:
+            parts.append(current)
+            current = ""
+        else:
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+            current += ch
+    if current:
+        parts.append(current)
+    return parts
+
+# ======================
+# --- Knowledge Base ---
+# ======================
+
+class KnowledgeBase:
+    def __init__(self):
+        self.facts = []
+        self.rules = []
+
+    def tell(self, statement):
+        """Add a fact or a rule to the KB."""
+        if "=>" in statement:
+            premise, conclusion = statement.split("=>")
+            premise_parts = [parse_term(p.strip()) for p in premise.split("&")]
+            conclusion = parse_term(conclusion.strip())
+            self.rules.append((premise_parts, conclusion))
+        else:
+            self.facts.append(parse_term(statement.strip()))
+
+    def fetch_facts(self):
+        return self.facts
+
+# ===========================
+# --- Forward Chaining ---
+# ===========================
+
+def forward_chain(kb, query):
+    query = parse_term(query)
+    new_facts = True
+    derived = set()
+
+    while new_facts:
+        new_facts = False
+        for premises, conclusion in kb.rules:
+            # Try to unify premises with known facts
+            matches = match_premises(premises, kb.facts)
+            for theta in matches:
+                inferred = substitute(conclusion, theta)
+                if inferred not in kb.facts:
+                    kb.facts.append(inferred)
+                    new_facts = True
+                    derived.add(str(inferred))
+                    print(f"Inferred: {inferred}")
+                    if unify(inferred, query) is not False:
+                        print("\n✅ Query is proved by forward chaining!")
+                        return True
+    print("\n❌ Query cannot be proved.")
+    return False
+
+def match_premises(premises, facts):
+    """Find substitutions that satisfy all premises."""
+    if not premises:
+        return [{}]
+    first, rest = premises[0], premises[1:]
+    matches = []
+    for fact in facts:
+        theta = unify(first, fact)
+        if theta is not False:
+            for sub_theta in match_premises([substitute(p, theta) for p in rest], facts):
+                merged = {**theta, **sub_theta}
+                matches.append(merged)
+    return matches
+
+def substitute(term, theta):
+    """Apply substitution theta to a term."""
+    if is_variable(term):
+        return theta.get(term, term)
+    elif is_compound(term):
+        return (term[0], [substitute(arg, theta) for arg in term[1]])
+    else:
+        return term
+
+# ======================
+# --- Example Usage ---
+# ======================
+
+if __name__ == "__main__":
+    kb = KnowledgeBase()
+
+    # --- Define Knowledge Base (FOL statements) ---
+    kb.tell("Human(Socrates)")
+    kb.tell("Human(x) => Mortal(x)")
+    kb.tell("Mortal(x) & Human(x) => Alive(x)")
+
+    # --- Query to prove ---
+    query = "Mortal(Socrates)"
+
+    print("=== Knowledge Base ===")
+    for f in kb.fetch_facts():
+        print("Fact:", f)
+    for p, c in kb.rules:
+        print("Rule:", p, "=>", c)
+
+    print("\n=== Forward Chaining ===")
+    forward_chain(kb, query)
