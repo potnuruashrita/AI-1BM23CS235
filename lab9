@@ -1,0 +1,124 @@
+def is_variable(x):
+    """A variable is represented as a string starting with '?'."""
+    return isinstance(x, str) and x.startswith('?')
+
+
+def substitute(term, subst):
+    """Apply substitution 'subst' to 'term'."""
+    if is_variable(term):
+        # Follow chain of substitutions if any
+        while is_variable(term) and term in subst:
+            term = subst[term]
+        return term
+    elif isinstance(term, tuple):
+        functor, args = term
+        return (functor, [substitute(a, subst) for a in args])
+    else:
+        # constant or something else
+        return term
+
+
+def occur_check(var, term, subst):
+    """Check if variable 'var' occurs in 'term' after applying 'subst'."""
+    term = substitute(term, subst)
+    if var == term:
+        return True
+    elif isinstance(term, tuple):
+        _, args = term
+        return any(occur_check(var, a, subst) for a in args)
+    else:
+        return False
+
+
+def unify_var(var, term, subst):
+    """Unify a variable with a term."""
+    var = substitute(var, subst)
+    term = substitute(term, subst)
+
+    if var == term:
+        return subst
+    if is_variable(var):
+        if occur_check(var, term, subst):
+            # Would create a cycle: no unifier
+            return None
+        subst[var] = term
+        return subst
+    else:
+        # var is not variable anymore, retry unify in general
+        return unify(var, term, subst)
+
+
+def unify(x, y, subst=None):
+    """
+    Robinson's unification algorithm.
+    x, y: terms
+    subst: current substitution (dict)
+    returns: substitution dict or None if cannot be unified
+    """
+    if subst is None:
+        subst = {}
+
+    x = substitute(x, subst)
+    y = substitute(y, subst)
+
+    # If already equal after substitution, done
+    if x == y:
+        return subst
+
+    # Variable cases
+    if is_variable(x):
+        return unify_var(x, y, subst)
+    if is_variable(y):
+        return unify_var(y, x, subst)
+
+    # Both are compound terms (functor, args)
+    if isinstance(x, tuple) and isinstance(y, tuple):
+        fx, argsx = x
+        fy, argsy = y
+
+        # Functor name and arity must match
+        if fx != fy or len(argsx) != len(argsy):
+            return None
+
+        # Unify arguments pairwise
+        for a, b in zip(argsx, argsy):
+            subst = unify(a, b, subst)
+            if subst is None:
+                return None
+        return subst
+
+    # Constants: if different, fail
+    if x != y:
+        return None
+
+    return subst
+
+
+# ----------------- TEST EXAMPLES ----------------- #
+if __name__ == "__main__":
+    # Example 1: knows(?x, ?y) and knows(john, ?z)
+    t1 = ("knows", ["?x", "?y"])
+    t2 = ("knows", ["john", "?z"])
+    print("Example 1:")
+    print("t1 =", t1)
+    print("t2 =", t2)
+    s = unify(t1, t2)
+    print("Substitution:", s, "\n")
+
+    # Example 2: father(?x) and father(john)
+    t3 = ("father", ["?x"])
+    t4 = ("father", ["john"])
+    print("Example 2:")
+    print("t3 =", t3)
+    print("t4 =", t4)
+    s = unify(t3, t4)
+    print("Substitution:", s, "\n")
+
+    # Example 3: f(?x, g(?x)) with f(a, g(b)) -> should FAIL (occur-check)
+    t5 = ("f", ["?x", ("g", ["?x"])])
+    t6 = ("f", ["a", ("g", ["b"])])
+    print("Example 3 (occur-check):")
+    print("t5 =", t5)
+    print("t6 =", t6)
+    s = unify(t5, t6)
+    print("Substitution:", s)
